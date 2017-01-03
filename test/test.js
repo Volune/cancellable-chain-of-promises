@@ -1,0 +1,239 @@
+/* eslint-env mocha */
+import expect from 'must';
+import sinon from 'sinon';
+import configureMustSinon from 'must-sinon';
+import Cancellable, { Aborted } from '../src/index';
+
+configureMustSinon(expect);
+
+const SOME_VALUE = {};
+const NOOP = () => {
+};
+const NOT_CALLED = () => {
+  throw new Error('Should not be called');
+};
+
+const testReturnsPromise = (run) => {
+  it('returns a promise', () => {
+    const promise = run(NOOP);
+    expect(promise).to.be.a(Promise);
+  });
+};
+
+const testCallback = (run, callbackName = 'callback') => {
+  it(`passes value to ${callbackName}`, () => {
+    const callback = sinon.spy();
+    return run(callback, { input: SOME_VALUE })
+      .then(() => {
+        expect(callback).to.have.been.calledOnce();
+        expect(callback).to.have.been.calledWithExactly(SOME_VALUE);
+      });
+  });
+
+  it(`rejects Aborted exception instead of calling ${callbackName} if aborted`, () => {
+    const { token: parentToken, abort } = Cancellable();
+    abort();
+    const callback = sinon.spy();
+    return run(callback, { parentToken })
+      .then(NOT_CALLED, (exception) => {
+        expect(callback).to.not.have.been.called();
+        expect(exception).to.be.a(Aborted);
+      });
+  });
+
+  it(`resolves with value returned from ${callbackName}`, () => {
+    const callback = sinon.stub().returns(SOME_VALUE);
+    return run(callback)
+      .then((value) => {
+        expect(callback).to.have.been.calledOnce();
+        expect(value).to.equal(SOME_VALUE);
+      });
+  });
+
+  it(`rejects with exception thrown from ${callbackName}`, () => {
+    const callback = sinon.stub().throws(SOME_VALUE);
+    return run(callback)
+      .then(NOT_CALLED, (value) => {
+        expect(callback).to.have.been.calledOnce();
+        expect(value).to.equal(SOME_VALUE);
+      });
+  });
+};
+
+describe('Cancellable', () => {
+  it('returns a token object and an abort function', () => {
+    const { token, abort } = Cancellable();
+    expect(token).to.be.an.object();
+    expect(token.aborted).to.be.a.boolean();
+    expect(token.then).to.be.a.function();
+    expect(token.catch).to.be.a.function();
+    expect(abort).to.be.a.function();
+  });
+
+  describe('abort', () => {
+    it('updates the token', () => {
+      const { token, abort } = Cancellable();
+      expect(token.aborted).to.be.false();
+      abort();
+      expect(token.aborted).to.be.true();
+    });
+
+    it('propagates to child token', () => {
+      const { token: parentToken, abort } = Cancellable();
+      const { token } = Cancellable(parentToken);
+      expect(token.aborted).to.be.false();
+      abort();
+      expect(token.aborted).to.be.true();
+    });
+  });
+
+  describe('always', () => {
+    it('is called with resolved value', () => {
+      const { token, abort } = Cancellable();
+      abort();
+      const callback = sinon.spy();
+      return Promise.resolve(SOME_VALUE)
+        ::token.always(callback)
+        .then(() => {
+          expect(callback).to.have.been.calledOnce();
+          expect(callback).to.have.been.calledWithExactly(undefined, SOME_VALUE);
+        });
+    });
+
+    it('is called with rejected value', () => {
+      const { token, abort } = Cancellable();
+      abort();
+      const callback = sinon.spy();
+      return Promise.reject(SOME_VALUE)
+        ::token.always(callback)
+        .then(NOT_CALLED, () => {
+          expect(callback).to.have.been.calledOnce();
+          expect(callback).to.have.been.calledWithExactly(SOME_VALUE, undefined);
+        });
+    });
+
+    it('is still called with aborted exception', () => {
+      const { token, abort } = Cancellable();
+      abort();
+      const callback = sinon.spy();
+      return Promise.resolve()
+        ::token.then(NOT_CALLED)
+        ::token.always(callback)
+        .then(NOT_CALLED, (abortedException) => {
+          expect(callback).to.have.been.calledOnce();
+          expect(callback).to.have.been.calledWithExactly(abortedException, undefined);
+        });
+    });
+  });
+
+  describe('token', () => {
+    describe('then', () => {
+      const run = (callback, { input, parentToken } = {}) => {
+        const { token } = Cancellable(parentToken);
+        return Promise.resolve(input)
+          ::token.then(callback);
+      };
+
+      const runRejection = (callback, { input, parentToken } = {}) => {
+        const { token } = Cancellable(parentToken);
+        return Promise.reject(input)
+          ::token.then(NOT_CALLED, callback);
+      };
+
+      testReturnsPromise(run);
+      testCallback(run);
+      testCallback(runRejection, 'rejection callback');
+    });
+
+    describe('catch', () => {
+      const run = (callback, { input, parentToken } = {}) => {
+        const { token } = Cancellable(parentToken);
+        return Promise.reject(input)
+          ::token.catch(callback);
+      };
+
+      testReturnsPromise(run);
+      testCallback(run);
+    });
+
+    describe('propagate', () => {
+      it('updates aborted', () => {
+        const { token } = Cancellable();
+        const { token: childToken, abort } = Cancellable(token);
+        abort();
+        const callback = sinon.spy();
+        return Promise.resolve()
+          ::childToken.then(NOOP)
+          ::token.propagate()
+          ::token.catch(callback)
+          .then(NOT_CALLED, (/* aborted */) => {
+            expect(callback).to.not.have.been.called();
+            expect(token.aborted).to.be.true();
+          });
+      });
+
+      it('doesn\'t update aborted if not called', () => {
+        const { token } = Cancellable();
+        const { token: childToken, abort } = Cancellable(token);
+        abort();
+        const callback = sinon.spy();
+        return Promise.resolve()
+          ::childToken.then(NOOP)
+          ::token.catch(callback)
+          .then(() => {
+            expect(callback).to.have.been.calledOnce();
+            expect(callback).to.have.been.calledWithExactly(sinon.match.instanceOf(Aborted));
+            expect(token.aborted).to.be.false();
+          });
+      });
+    });
+
+    describe('ifaborted', () => {
+      it('is called if aborted', () => {
+        const { token, abort } = Cancellable();
+        abort();
+        const callback = sinon.spy();
+        return Promise.resolve()
+          ::token.ifaborted(callback)
+          .then(() => {
+            expect(callback).to.have.been.calledOnce();
+            expect(callback).to.have.been.calledWithExactly(sinon.match.instanceOf(Aborted));
+          });
+      });
+
+      it('resolves with returned value if aborted', () => {
+        const { token, abort } = Cancellable();
+        abort();
+        const callback = sinon.stub().returns(SOME_VALUE);
+        return Promise.resolve()
+          ::token.ifaborted(callback)
+          .then((value) => {
+            expect(callback).to.have.been.calledOnce();
+            expect(value).to.equal(SOME_VALUE);
+          });
+      });
+
+      it('rejects with thrown exception if aborted', () => {
+        const { token, abort } = Cancellable();
+        abort();
+        const callback = sinon.stub().throws(SOME_VALUE);
+        return Promise.resolve()
+          ::token.ifaborted(callback)
+          .then(NOT_CALLED, (exception) => {
+            expect(callback).to.have.been.calledOnce();
+            expect(exception).to.equal(SOME_VALUE);
+          });
+      });
+
+      it('is not called if not aborted', () => {
+        const { token } = Cancellable();
+        const callback = sinon.spy();
+        return Promise.resolve()
+          ::token.ifaborted(callback)
+          .then(() => {
+            expect(callback).to.not.have.been.called();
+          });
+      });
+    });
+  });
+});
