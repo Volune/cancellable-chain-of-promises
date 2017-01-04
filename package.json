@@ -6,6 +6,12 @@
   "directories": {
     "test": "test"
   },
+  "files": [
+    "lib",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "build": "babel -s -d lib src",
     "eslint": "eslint .",
