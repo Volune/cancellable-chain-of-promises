@@ -12,23 +12,24 @@ export function Aborted() {
 Aborted.prototype = Object.create(Error.prototype);
 Aborted.prototype.name = 'Aborted';
 
-export function always(callback) {
-  const call = (that, resolvedValue, rejectedValue) => {
-    try {
-      // Put rejected value first to promote error handling
-      callback.call(that, rejectedValue, resolvedValue);
-    } catch (ex) {
-      setTimeout(() => {
-        throw ex;
-      });
-    }
-  };
+const safeCall = (callback, that, args) => {
+  try {
+    callback.apply(that, args);
+  } catch (ex) {
+    setTimeout(() => {
+      throw ex;
+    });
+  }
+};
 
+export function always(callback) {
   return this.then(function alwaysThen(resolvedValue) {
-    call(this, resolvedValue, undefined);
+    // Put rejected value first to promote error handling
+    safeCall(callback, this, [undefined, resolvedValue]);
     return resolvedValue;
   }, function alwaysCatch(rejectedValue) {
-    call(this, undefined, rejectedValue);
+    // Put rejected value first to promote error handling
+    safeCall(callback, this, [rejectedValue, undefined]);
     throw rejectedValue;
   });
 }
@@ -39,60 +40,85 @@ export const createCancellable = (...unfilteredTokens) => {
   const tokens = unfilteredTokens.length > 0 ?
     unfilteredTokens.filter(Boolean) : EMPTY_TOKENS;
 
+  let listeners = [];
+
+  const addAbortListener = (listener) => {
+    if (abortError !== null) {
+      listener(abortError);
+      return;
+    }
+    if (listeners.indexOf(listener) < 0) {
+      listeners.push(listener);
+    }
+  };
+
+  const removeAbortListener = (listener) => {
+    const listenerIndex = listeners.indexOf(listener);
+    if (listenerIndex >= 0) {
+      listeners.splice(listenerIndex, 1);
+    }
+  };
+
+  const triggerAbort = (newAbortError) => {
+    if (abortError !== null) {
+      return;
+    }
+    abortError = newAbortError;
+    tokens.forEach((parentToken) => {
+      parentToken.removeAbortListener(triggerAbort);
+    });
+    const listenersToCall = listeners;
+    listeners = [];
+    listenersToCall.forEach((listener) => {
+      safeCall(listener, undefined, [abortError]);
+    });
+  };
+
+  const abort = () => {
+    triggerAbort(new Aborted());
+  };
+
   const isAborted = () => {
     if (abortError !== null) {
       return true;
     }
     return tokens.length > 0 &&
-      tokens.some((t) => {
-        if (t.aborted) {
-          abortError = t.abortError;
-          return true;
-        }
-        return false;
-      });
+      tokens.some(t => t.aborted);
+  };
+
+  const wrap = handler => function handle(...args) {
+    if (isAborted()) {
+      throw abortError;
+    }
+    let listener;
+    return Promise.race([
+      handler.apply(this, args),
+      new Promise((resolve, reject) => {
+        listener = reject;
+        addAbortListener(reject);
+      }),
+    ])
+      ::always(() => removeAbortListener(listener));
   };
 
   function cancellableThen(resolveHandler, rejectHandler = undefined) {
-    function handleResolve(...args) {
-      if (isAborted()) {
-        throw abortError;
-      }
-      return resolveHandler.apply(this, args);
-    }
-
-    function handleReject(...args) {
-      if (isAborted()) {
-        throw abortError;
-      }
-      return rejectHandler.apply(this, args);
-    }
-
     if (rejectHandler) {
-      return this.then(handleResolve, handleReject);
+      return this.then(wrap(resolveHandler), wrap(rejectHandler));
     }
-    return this.then(handleResolve);
+    return this.then(wrap(resolveHandler));
   }
 
-  // eslint-disable-next-line no-underscore-dangle
   function cancellableCatch(rejectHandler) {
-    function handleReject(...args) {
-      if (isAborted()) {
-        throw abortError;
-      }
-      return rejectHandler.apply(this, args);
-    }
-
-    return this.catch(handleReject);
+    return this.catch(wrap(rejectHandler));
   }
 
-  function propagateAbort() {
+  function propagate() {
     return this.catch((exception) => {
       if (isAborted()) {
         throw abortError;
       }
       if (exception instanceof Aborted) {
-        abortError = exception;
+        triggerAbort(exception);
       }
       throw exception;
     });
@@ -125,13 +151,25 @@ export const createCancellable = (...unfilteredTokens) => {
     },
     then: cancellableThen,
     catch: cancellableCatch,
-    propagate: propagateAbort,
     ifaborted: ifAborted,
+    propagate,
+    addAbortListener,
+    removeAbortListener,
     always,
   };
-  const abort = () => {
-    abortError = new Aborted();
-  };
+
+  tokens.some((parentToken) => {
+    if (parentToken.aborted) {
+      abortError = parentToken.abortError;
+      return true;
+    }
+    return false;
+  });
+  if (abortError === null) {
+    tokens.forEach((parentToken) => {
+      parentToken.addAbortListener(triggerAbort);
+    });
+  }
 
   return {
     token,

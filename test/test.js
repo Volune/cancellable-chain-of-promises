@@ -13,7 +13,11 @@ const NOT_CALLED = () => {
   throw new Error('Should not be called');
 };
 
-const testReturnsPromise = (run) => {
+const timeout = (duration = 0) => new Promise((resolve, reject) => {
+  setTimeout(() => reject(new Error('Timeout')), duration);
+});
+
+const testThenCatch = (run) => {
   it('returns a promise', () => {
     const promise = run(NOOP);
     expect(promise).to.be.a(Promise);
@@ -37,7 +41,7 @@ const testCallback = (run, callbackName = 'callback') => {
     return run(callback, { parentToken })
       .then(NOT_CALLED, (exception) => {
         expect(callback).to.not.have.been.called();
-        expect(exception).to.be.a(Aborted);
+        expect(exception).to.be.an(Aborted);
       });
   });
 
@@ -57,6 +61,21 @@ const testCallback = (run, callbackName = 'callback') => {
         expect(callback).to.have.been.calledOnce();
         expect(value).to.equal(SOME_VALUE);
       });
+  });
+
+  it(`doesn't wait for ${callbackName} to complete if aborted`, () => {
+    const callback = sinon.stub().returns(new Promise(NOOP));
+    const { token: parentToken, abort } = Cancellable();
+    const promise = Promise.race([
+      run(callback, { parentToken }),
+      timeout(100),
+    ])
+      .then(NOT_CALLED, (value) => {
+        expect(callback).to.have.been.calledOnce();
+        expect(value).to.be.an(Aborted);
+      });
+    setTimeout(abort, 10);
+    return promise;
   });
 };
 
@@ -140,7 +159,7 @@ describe('Cancellable', () => {
           ::token.then(NOT_CALLED, callback);
       };
 
-      testReturnsPromise(run);
+      testThenCatch(run);
       testCallback(run);
       testCallback(runRejection, 'rejection callback');
     });
@@ -152,7 +171,7 @@ describe('Cancellable', () => {
           ::token.catch(callback);
       };
 
-      testReturnsPromise(run);
+      testThenCatch(run);
       testCallback(run);
     });
 
@@ -233,6 +252,18 @@ describe('Cancellable', () => {
           .then(() => {
             expect(callback).to.not.have.been.called();
           });
+      });
+    });
+
+    describe('addAbortListener', () => {
+      it('is called with abort error on abort', () => {
+        const { token, abort } = Cancellable();
+        const listener = sinon.spy();
+        token.addAbortListener(listener);
+        expect(listener).to.not.have.been.called();
+        abort();
+        expect(listener).to.have.been.calledOnce();
+        expect(listener).to.have.been.calledWithExactly(sinon.match.instanceOf(Aborted));
       });
     });
   });
