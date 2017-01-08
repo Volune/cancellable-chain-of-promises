@@ -19,10 +19,7 @@
     "prepublish": "npm run build",
     "test": "npm run-script eslint && npm run-script mocha"
   },
-  "repository": {
-    "type": "git",
-    "url": "github.com/Volune/cancellable-chain-of-promises"
-  },
+  "repository": "Volune/cancellable-chain-of-promises",
   "keywords": [
     "cancellable",
     "promise",
