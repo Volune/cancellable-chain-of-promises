@@ -1,4 +1,5 @@
 const EMPTY_TOKENS = [];
+const NOOP = () => undefined;
 const ABORTED_MESSAGE = 'Aborted';
 export function Aborted() {
   Error.call(this, ABORTED_MESSAGE);
@@ -22,6 +23,16 @@ const safeCall = (callback, that, args) => {
   }
 };
 
+function silent() {
+  const promise = this.catch((rejectedValue) => {
+    if (rejectedValue instanceof Aborted) {
+      promise.catch(NOOP);
+    }
+    throw rejectedValue;
+  });
+  return promise;
+}
+
 export function always(callback) {
   return this.then(function alwaysThen(resolvedValue) {
     // Put rejected value first to promote error handling
@@ -31,7 +42,7 @@ export function always(callback) {
     // Put rejected value first to promote error handling
     safeCall(callback, this, [rejectedValue, undefined]);
     throw rejectedValue;
-  });
+  })::silent();
 }
 
 export const createCancellable = (...unfilteredTokens) => {
@@ -103,13 +114,13 @@ export const createCancellable = (...unfilteredTokens) => {
 
   function cancellableThen(resolveHandler, rejectHandler = undefined) {
     if (rejectHandler) {
-      return this.then(wrap(resolveHandler), wrap(rejectHandler));
+      return this.then(wrap(resolveHandler), wrap(rejectHandler))::silent();
     }
-    return this.then(wrap(resolveHandler));
+    return this.then(wrap(resolveHandler))::silent();
   }
 
   function cancellableCatch(rejectHandler) {
-    return this.catch(wrap(rejectHandler));
+    return this.catch(wrap(rejectHandler))::silent();
   }
 
   function propagate() {
@@ -121,7 +132,7 @@ export const createCancellable = (...unfilteredTokens) => {
         triggerAbort(exception);
       }
       throw exception;
-    });
+    })::silent();
   }
 
   function ifAborted(callback) {
@@ -139,15 +150,7 @@ export const createCancellable = (...unfilteredTokens) => {
       throw exception;
     }
 
-    return this.then(handleResolve, handleReject);
-  }
-
-  function silent() {
-    this.catch((exception) => {
-      if (exception !== abortError) {
-        throw exception;
-      }
-    });
+    return this.then(handleResolve, handleReject); // don't silent that one
   }
 
   const token = {
@@ -163,7 +166,6 @@ export const createCancellable = (...unfilteredTokens) => {
     propagate,
     addAbortListener,
     removeAbortListener,
-    silent,
     always,
   };
 

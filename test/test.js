@@ -7,8 +7,7 @@ import Cancellable, { Aborted } from '../src/index';
 configureMustSinon(expect);
 
 const SOME_VALUE = {};
-const NOOP = () => {
-};
+const NOOP = () => undefined;
 const NOT_CALLED = () => {
   throw new Error('Should not be called');
 };
@@ -20,11 +19,37 @@ const timeout = (duration = 0) => new Promise((resolve, reject) => {
   setTimeout(() => reject(new Error('Timeout')), duration);
 });
 
+const testSilent = (runSilent) => {
+  it('is silent', () => {
+    unhandledRejectionHandler = sinon.spy();
+    process.on(UNHANDLED_REJECTION_EVENT, unhandledRejectionHandler);
+    runSilent();
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          expect(unhandledRejectionHandler).to.not.have.been.called();
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      }, 10);
+    });
+  });
+};
+
 const testThenCatch = (run) => {
   it('returns a promise', () => {
     const promise = run(NOOP);
     expect(promise).to.be.a(Promise);
   });
+
+  const runSilent = () => {
+    const { token: parentToken, abort } = Cancellable();
+    abort();
+    run(NOOP, { parentToken });
+  };
+
+  testSilent(runSilent);
 };
 
 const testCallback = (run, callbackName = 'callback') => {
@@ -79,6 +104,23 @@ const testCallback = (run, callbackName = 'callback') => {
       });
     setTimeout(abort, 10);
     return promise;
+  });
+
+  it(`isn't silent with rejection from ${callbackName}`, () => {
+    unhandledRejectionHandler = sinon.spy();
+    process.on(UNHANDLED_REJECTION_EVENT, unhandledRejectionHandler);
+    run(() => Promise.reject(SOME_VALUE));
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          expect(unhandledRejectionHandler).to.have.been.calledOnce();
+          expect(unhandledRejectionHandler).to.have.been.calledWith(SOME_VALUE);
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      }, 10);
+    });
   });
 };
 
@@ -161,6 +203,15 @@ describe('Cancellable', () => {
           expect(callback).to.have.been.calledWithExactly(abortedException, undefined);
         });
     });
+
+    const runSilent = () => {
+      const { token, abort } = Cancellable();
+      abort();
+      return Promise.reject(token.abortError)
+        ::token.always(NOOP);
+    };
+
+    testSilent(runSilent);
   });
 
   describe('token', () => {
@@ -223,6 +274,14 @@ describe('Cancellable', () => {
             expect(token.aborted).to.be.false();
           });
       });
+
+      const runSilent = () => {
+        const { token, abort } = Cancellable();
+        abort();
+        return Promise.resolve()::token.propagate();
+      };
+
+      testSilent(runSilent);
     });
 
     describe('ifaborted', () => {
@@ -282,53 +341,6 @@ describe('Cancellable', () => {
         abort();
         expect(listener).to.have.been.calledOnce();
         expect(listener).to.have.been.calledWithExactly(sinon.match.instanceOf(Aborted));
-      });
-    });
-
-    describe('silent', () => {
-      it('returns undefined', () => {
-        const { token } = Cancellable();
-        expect(Promise.resolve()::token.silent()).to.be.undefined();
-      });
-
-      it('silent unhandled Aborted rejection', () => {
-        unhandledRejectionHandler = sinon.spy();
-        process.on(UNHANDLED_REJECTION_EVENT, unhandledRejectionHandler);
-        const { token, abort } = Cancellable();
-        abort();
-        Promise.resolve()
-          ::token.then(NOOP)
-          ::token.silent();
-        return new Promise((resolve, reject) => {
-          setTimeout(() => {
-            try {
-              expect(unhandledRejectionHandler).to.not.have.been.called();
-              resolve();
-            } catch (err) {
-              reject(err);
-            }
-          }, 10);
-        });
-      });
-
-      it('doesn\'t silent other rejection', () => {
-        unhandledRejectionHandler = sinon.spy();
-        process.on(UNHANDLED_REJECTION_EVENT, unhandledRejectionHandler);
-        const { token } = Cancellable();
-        Promise.reject(SOME_VALUE)
-          ::token.then(NOOP)
-          ::token.silent();
-        return new Promise((resolve, reject) => {
-          setTimeout(() => {
-            try {
-              expect(unhandledRejectionHandler).to.have.been.calledOnce();
-              expect(unhandledRejectionHandler).to.have.been.calledWith(SOME_VALUE);
-              resolve();
-            } catch (err) {
-              reject(err);
-            }
-          }, 10);
-        });
       });
     });
   });
