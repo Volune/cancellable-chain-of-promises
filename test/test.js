@@ -131,7 +131,7 @@ describe('Cancellable', () => {
         });
     });
 
-    it('is still called with aborted exception', () => {
+    it('is still called after then with aborted exception', () => {
       const { token, abort } = Cancellable();
       abort();
       const callback = sinon.spy();
@@ -139,6 +139,21 @@ describe('Cancellable', () => {
         ::token.then(NOT_CALLED)
         ::token.always(callback)
         .then(NOT_CALLED, (abortedException) => {
+          expect(abortedException).to.be.an(Aborted);
+          expect(callback).to.have.been.calledOnce();
+          expect(callback).to.have.been.calledWithExactly(abortedException, undefined);
+        });
+    });
+
+    it('is still called after catch with aborted exception', () => {
+      const { token, abort } = Cancellable();
+      abort();
+      const callback = sinon.spy();
+      return Promise.reject()
+        ::token.catch(NOT_CALLED)
+        ::token.always(callback)
+        .then(NOT_CALLED, (abortedException) => {
+          expect(abortedException).to.be.an(Aborted);
           expect(callback).to.have.been.calledOnce();
           expect(callback).to.have.been.calledWithExactly(abortedException, undefined);
         });
