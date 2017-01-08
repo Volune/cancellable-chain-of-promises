@@ -142,6 +142,14 @@ export const createCancellable = (...unfilteredTokens) => {
     return this.then(handleResolve, handleReject);
   }
 
+  function silent() {
+    this.catch((exception) => {
+      if (exception !== abortError) {
+        throw exception;
+      }
+    });
+  }
+
   const token = {
     get aborted() {
       return isAborted();
@@ -155,6 +163,7 @@ export const createCancellable = (...unfilteredTokens) => {
     propagate,
     addAbortListener,
     removeAbortListener,
+    silent,
     always,
   };
 
