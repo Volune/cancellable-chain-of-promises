@@ -163,7 +163,6 @@ export const createCancellable = (...unfilteredTokens) => {
     then: cancellableThen,
     catch: cancellableCatch,
     ifaborted: ifAborted,
-    propagate,
     addAbortListener,
     removeAbortListener,
     always,
@@ -185,6 +184,7 @@ export const createCancellable = (...unfilteredTokens) => {
   return {
     token,
     abort,
+    propagate,
   };
 };
 

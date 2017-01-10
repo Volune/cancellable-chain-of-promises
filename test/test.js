@@ -244,46 +244,6 @@ describe('Cancellable', () => {
       testCallback(run);
     });
 
-    describe('propagate', () => {
-      it('updates aborted', () => {
-        const { token } = Cancellable();
-        const { token: childToken, abort } = Cancellable(token);
-        abort();
-        const callback = sinon.spy();
-        return Promise.resolve()
-          ::childToken.then(NOOP)
-          ::token.propagate()
-          ::token.catch(callback)
-          .then(NOT_CALLED, (/* aborted */) => {
-            expect(callback).to.not.have.been.called();
-            expect(token.aborted).to.be.true();
-          });
-      });
-
-      it('doesn\'t update aborted if not called', () => {
-        const { token } = Cancellable();
-        const { token: childToken, abort } = Cancellable(token);
-        abort();
-        const callback = sinon.spy();
-        return Promise.resolve()
-          ::childToken.then(NOOP)
-          ::token.catch(callback)
-          .then(() => {
-            expect(callback).to.have.been.calledOnce();
-            expect(callback).to.have.been.calledWithExactly(sinon.match.instanceOf(Aborted));
-            expect(token.aborted).to.be.false();
-          });
-      });
-
-      const runSilent = () => {
-        const { token, abort } = Cancellable();
-        abort();
-        return Promise.resolve()::token.propagate();
-      };
-
-      testSilent(runSilent);
-    });
-
     describe('ifaborted', () => {
       it('is called if aborted', () => {
         const { token, abort } = Cancellable();
@@ -343,6 +303,52 @@ describe('Cancellable', () => {
         expect(listener).to.have.been.calledWithExactly(sinon.match.instanceOf(Aborted));
       });
     });
+  });
+
+  describe('propagate', () => {
+    it('updates aborted', () => {
+      const { token, propagate } = Cancellable();
+      const { token: childToken, abort } = Cancellable(token);
+      abort();
+      const callback = sinon.spy();
+      return Promise.resolve()
+        ::childToken.then(NOOP)
+        ::propagate()
+        ::token.catch(callback)
+        .then(NOT_CALLED, (/* aborted */) => {
+          expect(callback).to.not.have.been.called();
+          expect(token.aborted).to.be.true();
+        });
+    });
+
+    it('doesn\'t update aborted if not called', () => {
+      const { token } = Cancellable();
+      const { token: childToken, abort } = Cancellable(token);
+      abort();
+      const callback = sinon.spy();
+      return Promise.resolve()
+        ::childToken.then(NOOP)
+        ::token.catch(callback)
+        .then(() => {
+          expect(callback).to.have.been.calledOnce();
+          expect(callback).to.have.been.calledWithExactly(sinon.match.instanceOf(Aborted));
+          expect(token.aborted).to.be.false();
+        });
+    });
+
+    it('returns a promise', () => {
+      const { propagate } = Cancellable();
+      const promise = Promise.resolve()::propagate();
+      expect(promise).to.be.a(Promise);
+    });
+
+    const runSilent = () => {
+      const { abort, propagate } = Cancellable();
+      abort();
+      return Promise.resolve()::propagate();
+    };
+
+    testSilent(runSilent);
   });
 
   afterEach(() => {
