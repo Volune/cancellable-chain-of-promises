@@ -70,11 +70,17 @@ export function propagate(abort) {
   })::silent();
 };
 
+const looksLikeAPromise = promise => (promise && typeof promise.then === 'function');
+
 const wrap = (token, handler) => function handle(...args) {
   throwIfAborted(token);
+  let result = handler.apply(this, args);
+  if (!looksLikeAPromise(result)) {
+    return result;
+  }
   let listener;
   return Promise.race([
-    handler.apply(this, args),
+    result,
     new Promise((resolve, reject) => {
       listener = reject;
       token.addAbortListener(reject);
