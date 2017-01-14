@@ -1,4 +1,3 @@
-const EMPTY_TOKENS = [];
 const NOOP = () => undefined;
 const ABORTED_MESSAGE = 'Aborted';
 export function Aborted() {
@@ -68,13 +67,13 @@ export function propagate(abort) {
     }
     throw exception;
   })::silent();
-};
+}
 
 const looksLikeAPromise = promise => (promise && typeof promise.then === 'function');
 
 const wrap = (token, handler) => function handle(...args) {
   throwIfAborted(token);
-  let result = handler.apply(this, args);
+  const result = handler.apply(this, args);
   if (!looksLikeAPromise(result)) {
     return result;
   }
@@ -89,8 +88,8 @@ const wrap = (token, handler) => function handle(...args) {
     ::always(() => token.removeAbortListener(listener));
 };
 
-const makeChainFunctions = (token) => ({
-  then (resolveHandler, rejectHandler) {
+const makeChainFunctions = token => ({
+  then(resolveHandler, rejectHandler) {
     if (rejectHandler) {
       return this.then(wrap(token, resolveHandler), wrap(token, rejectHandler))::silent();
     }
@@ -125,7 +124,7 @@ const makeChainFunctions = (token) => ({
 export default class CancelToken {
   constructor(...parentTokens) {
     const callback = typeof parentTokens[0] === 'function' ? parentTokens.shift() : undefined;
-    if (parentTokens.some(parentToken => !isCancelToken(parentToken))) {
+    if (parentTokens.some(parentToken => !(parentToken instanceof CancelToken))) {
       throw new Error('Invalid argument parentToken');
     }
 
@@ -201,9 +200,7 @@ export default class CancelToken {
     }
   }
 }
-
-const isCancelToken = token => token instanceof CancelToken;
-CancelToken.isCancelToken = isCancelToken;
+CancelToken.isCancelToken = token => token instanceof CancelToken;
 
 export const create = (...parentTokens) => {
   let abort;
@@ -219,4 +216,4 @@ export const create = (...parentTokens) => {
     token,
     abort,
   };
-}
+};
