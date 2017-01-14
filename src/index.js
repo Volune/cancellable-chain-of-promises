@@ -13,6 +13,12 @@ export function Aborted() {
 Aborted.prototype = Object.create(Error.prototype);
 Aborted.prototype.name = 'Aborted';
 
+const isAborted = exception => exception instanceof Aborted;
+Aborted.isAborted = isAborted;
+
+const ABORT_ERROR = Symbol('abortError');
+const LISTENERS = Symbol('listeners');
+
 const safeCall = (callback, that, args) => {
   try {
     callback.apply(that, args);
@@ -20,6 +26,13 @@ const safeCall = (callback, that, args) => {
     setTimeout(() => {
       throw ex;
     });
+  }
+};
+
+const throwIfAborted = (token) => {
+  const abortError = token.abortError;
+  if (abortError) {
+    throw abortError;
   }
 };
 
@@ -45,151 +58,159 @@ export function always(callback) {
   })::silent();
 }
 
-export const createCancellable = (...unfilteredTokens) => {
-  let abortError = null;
-
-  const tokens = unfilteredTokens.length > 0 ?
-    unfilteredTokens.filter(Boolean) : EMPTY_TOKENS;
-
-  let listeners = [];
-
-  const addAbortListener = (listener) => {
-    if (abortError !== null) {
-      listener(abortError);
-      return;
+export function propagate(abort) {
+  if (typeof abort !== 'function') {
+    throw new Error('Invalid argument abort');
+  }
+  return this.catch((exception) => {
+    if (exception instanceof Aborted) {
+      abort(exception);
     }
-    if (listeners.indexOf(listener) < 0) {
-      listeners.push(listener);
-    }
-  };
+    throw exception;
+  })::silent();
+};
 
-  const removeAbortListener = (listener) => {
-    const listenerIndex = listeners.indexOf(listener);
-    if (listenerIndex >= 0) {
-      listeners.splice(listenerIndex, 1);
-    }
-  };
+const wrap = (token, handler) => function handle(...args) {
+  throwIfAborted(token);
+  let listener;
+  return Promise.race([
+    handler.apply(this, args),
+    new Promise((resolve, reject) => {
+      listener = reject;
+      token.addAbortListener(reject);
+    }),
+  ])
+    ::always(() => token.removeAbortListener(listener));
+};
 
-  const triggerAbort = (newAbortError) => {
-    if (abortError !== null) {
-      return;
-    }
-    abortError = newAbortError;
-    tokens.forEach((parentToken) => {
-      parentToken.removeAbortListener(triggerAbort);
-    });
-    const listenersToCall = listeners;
-    listeners = [];
-    listenersToCall.forEach((listener) => {
-      safeCall(listener, undefined, [abortError]);
-    });
-  };
-
-  const abort = () => {
-    triggerAbort(new Aborted());
-  };
-
-  const isAborted = () => {
-    if (abortError !== null) {
-      return true;
-    }
-    return tokens.length > 0 &&
-      tokens.some(t => t.aborted);
-  };
-
-  const wrap = handler => function handle(...args) {
-    if (isAborted()) {
-      throw abortError;
-    }
-    let listener;
-    return Promise.race([
-      handler.apply(this, args),
-      new Promise((resolve, reject) => {
-        listener = reject;
-        addAbortListener(reject);
-      }),
-    ])
-      ::always(() => removeAbortListener(listener));
-  };
-
-  function cancellableThen(resolveHandler, rejectHandler = undefined) {
+const makeChainFunctions = (token) => ({
+  then (resolveHandler, rejectHandler) {
     if (rejectHandler) {
-      return this.then(wrap(resolveHandler), wrap(rejectHandler))::silent();
+      return this.then(wrap(token, resolveHandler), wrap(token, rejectHandler))::silent();
     }
-    return this.then(wrap(resolveHandler))::silent();
-  }
-
-  function cancellableCatch(rejectHandler) {
-    return this.catch(wrap(rejectHandler))::silent();
-  }
-
-  function propagate() {
-    return this.catch((exception) => {
-      if (isAborted()) {
-        throw abortError;
-      }
-      if (exception instanceof Aborted) {
-        triggerAbort(exception);
-      }
-      throw exception;
-    })::silent();
-  }
-
-  function ifAborted(callback) {
+    return this.then(wrap(token, resolveHandler))::silent();
+  },
+  catch(rejectHandler) {
+    return this.catch(wrap(token, rejectHandler))::silent();
+  },
+  ifaborted(callback) {
     function handleResolve(value) {
-      if (isAborted()) {
+      const abortError = token.abortError;
+      if (abortError) {
         return callback(abortError);
       }
       return value;
     }
 
     function handleReject(exception) {
-      if (isAborted()) {
+      const abortError = token.abortError;
+      if (abortError) {
         return callback(abortError);
       }
       throw exception;
     }
 
     return this.then(handleResolve, handleReject); // don't silent that one
-  }
+  },
+  propagate,
+  always,
+});
 
-  const token = {
-    get aborted() {
-      return isAborted();
-    },
-    get abortError() {
-      return abortError;
-    },
-    then: cancellableThen,
-    catch: cancellableCatch,
-    ifaborted: ifAborted,
-    addAbortListener,
-    removeAbortListener,
-    always,
-  };
-
-  tokens.some((parentToken) => {
-    if (parentToken.aborted) {
-      abortError = parentToken.abortError;
-      return true;
+export default class CancelToken {
+  constructor(...parentTokens) {
+    const callback = typeof parentTokens[0] === 'function' ? parentTokens.shift() : undefined;
+    if (parentTokens.some(parentToken => !isCancelToken(parentToken))) {
+      throw new Error('Invalid argument parentToken');
     }
-    return false;
-  });
-  if (abortError === null) {
-    tokens.forEach((parentToken) => {
-      parentToken.addAbortListener(triggerAbort);
-    });
+
+    this[ABORT_ERROR] = null;
+    this[LISTENERS] = [];
+
+    const abort = (newAbortError = undefined) => {
+      if (this[ABORT_ERROR] !== null) {
+        return;
+      }
+      const abortError = this[ABORT_ERROR] = newAbortError || new Aborted();
+      parentTokens.forEach((parentToken) => {
+        parentToken.removeAbortListener(abort);
+      });
+      const listenersToCall = this[LISTENERS];
+      this[LISTENERS] = [];
+      listenersToCall.forEach((listener) => {
+        safeCall(listener, undefined, [abortError]);
+      });
+    };
+
+    if (callback) {
+      callback(abort);
+    }
+
+    this.chain = makeChainFunctions(this);
+    // alias chain functions on the token
+    Object.assign(this, this.chain);
+
+    // Propagate aborted state from parent tokens
+    if (this[ABORT_ERROR] === null) {
+      parentTokens.some((parentToken) => {
+        if (parentToken.aborted) {
+          this[ABORT_ERROR] = parentToken.abortError;
+          return true;
+        }
+        return false;
+      });
+    }
+    // if not aborted yet, then listen to parent tokens
+    if (this[ABORT_ERROR] === null) {
+      parentTokens.forEach((parentToken) => {
+        parentToken.addAbortListener(abort);
+      });
+    }
   }
 
+  get abortError() {
+    return this[ABORT_ERROR];
+  }
+
+  get aborted() {
+    return Boolean(this[ABORT_ERROR]);
+  }
+
+  addAbortListener(listener) {
+    const abortError = this[ABORT_ERROR];
+    if (abortError) {
+      listener(abortError);
+      return;
+    }
+    const listeners = this[LISTENERS];
+    if (listeners.indexOf(listener) < 0) {
+      listeners.push(listener);
+    }
+  }
+
+  removeAbortListener(listener) {
+    const listeners = this[LISTENERS];
+    const listenerIndex = listeners.indexOf(listener);
+    if (listenerIndex >= 0) {
+      listeners.splice(listenerIndex, 1);
+    }
+  }
+}
+
+const isCancelToken = token => token instanceof CancelToken;
+CancelToken.isCancelToken = isCancelToken;
+
+export const create = (...parentTokens) => {
+  let abort;
+  const callback = typeof parentTokens[0] === 'function' ? parentTokens.shift() : undefined;
+  parentTokens.unshift((abortFunction) => {
+    abort = abortFunction;
+    if (callback) {
+      callback(abortFunction);
+    }
+  });
+  const token = new CancelToken(...parentTokens);
   return {
     token,
     abort,
-    propagate,
   };
-};
-
-createCancellable.create = createCancellable;
-createCancellable.always = always;
-createCancellable.Aborted = Aborted;
-
-export default createCancellable;
+}

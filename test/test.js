@@ -2,7 +2,12 @@
 import expect from 'must';
 import sinon from 'sinon';
 import configureMustSinon from 'must-sinon';
-import Cancellable, { Aborted } from '../src/index';
+import {
+  Aborted,
+  create as createCancelToken,
+  propagate,
+  always,
+} from '../src/index';
 
 configureMustSinon(expect);
 
@@ -44,7 +49,7 @@ const testThenCatch = (run) => {
   });
 
   const runSilent = () => {
-    const { token: parentToken, abort } = Cancellable();
+    const { token: parentToken, abort } = createCancelToken();
     abort();
     run(NOOP, { parentToken });
   };
@@ -63,7 +68,7 @@ const testCallback = (run, callbackName = 'callback') => {
   });
 
   it(`rejects Aborted exception instead of calling ${callbackName} if aborted`, () => {
-    const { token: parentToken, abort } = Cancellable();
+    const { token: parentToken, abort } = createCancelToken();
     abort();
     const callback = sinon.spy();
     return run(callback, { parentToken })
@@ -93,7 +98,7 @@ const testCallback = (run, callbackName = 'callback') => {
 
   it(`doesn't wait for ${callbackName} to complete if aborted`, () => {
     const callback = sinon.stub().returns(new Promise(NOOP));
-    const { token: parentToken, abort } = Cancellable();
+    const { token: parentToken, abort } = createCancelToken();
     const promise = Promise.race([
       run(callback, { parentToken }),
       timeout(100),
@@ -124,9 +129,9 @@ const testCallback = (run, callbackName = 'callback') => {
   });
 };
 
-describe('Cancellable', () => {
+describe('createCancelToken', () => {
   it('returns a token object and an abort function', () => {
-    const { token, abort } = Cancellable();
+    const { token, abort } = createCancelToken();
     expect(token).to.be.an.object();
     expect(token.aborted).to.be.a.boolean();
     expect(token.then).to.be.a.function();
@@ -136,15 +141,15 @@ describe('Cancellable', () => {
 
   describe('abort', () => {
     it('updates the token', () => {
-      const { token, abort } = Cancellable();
+      const { token, abort } = createCancelToken();
       expect(token.aborted).to.be.false();
       abort();
       expect(token.aborted).to.be.true();
     });
 
     it('propagates to child token', () => {
-      const { token: parentToken, abort } = Cancellable();
-      const { token } = Cancellable(parentToken);
+      const { token: parentToken, abort } = createCancelToken();
+      const { token } = createCancelToken(parentToken);
       expect(token.aborted).to.be.false();
       abort();
       expect(token.aborted).to.be.true();
@@ -153,11 +158,9 @@ describe('Cancellable', () => {
 
   describe('always', () => {
     it('is called with resolved value', () => {
-      const { token, abort } = Cancellable();
-      abort();
       const callback = sinon.spy();
       return Promise.resolve(SOME_VALUE)
-        ::token.always(callback)
+        ::always(callback)
         .then(() => {
           expect(callback).to.have.been.calledOnce();
           expect(callback).to.have.been.calledWithExactly(undefined, SOME_VALUE);
@@ -165,11 +168,9 @@ describe('Cancellable', () => {
     });
 
     it('is called with rejected value', () => {
-      const { token, abort } = Cancellable();
-      abort();
       const callback = sinon.spy();
       return Promise.reject(SOME_VALUE)
-        ::token.always(callback)
+        ::always(callback)
         .then(NOT_CALLED, () => {
           expect(callback).to.have.been.calledOnce();
           expect(callback).to.have.been.calledWithExactly(SOME_VALUE, undefined);
@@ -177,12 +178,12 @@ describe('Cancellable', () => {
     });
 
     it('is still called after then with aborted exception', () => {
-      const { token, abort } = Cancellable();
+      const { token, abort } = createCancelToken();
       abort();
       const callback = sinon.spy();
       return Promise.resolve()
         ::token.then(NOT_CALLED)
-        ::token.always(callback)
+        ::always(callback)
         .then(NOT_CALLED, (abortedException) => {
           expect(abortedException).to.be.an(Aborted);
           expect(callback).to.have.been.calledOnce();
@@ -191,12 +192,12 @@ describe('Cancellable', () => {
     });
 
     it('is still called after catch with aborted exception', () => {
-      const { token, abort } = Cancellable();
+      const { token, abort } = createCancelToken();
       abort();
       const callback = sinon.spy();
       return Promise.reject()
         ::token.catch(NOT_CALLED)
-        ::token.always(callback)
+        ::always(callback)
         .then(NOT_CALLED, (abortedException) => {
           expect(abortedException).to.be.an(Aborted);
           expect(callback).to.have.been.calledOnce();
@@ -205,10 +206,10 @@ describe('Cancellable', () => {
     });
 
     const runSilent = () => {
-      const { token, abort } = Cancellable();
+      const { token, abort } = createCancelToken();
       abort();
       return Promise.reject(token.abortError)
-        ::token.always(NOOP);
+        ::always(NOOP);
     };
 
     testSilent(runSilent);
@@ -217,13 +218,13 @@ describe('Cancellable', () => {
   describe('token', () => {
     describe('then', () => {
       const run = (callback, { input, parentToken } = {}) => {
-        const { token } = Cancellable(parentToken);
+        const { token } = createCancelToken(...[parentToken].filter(Boolean));
         return Promise.resolve(input)
           ::token.then(callback);
       };
 
       const runRejection = (callback, { input, parentToken } = {}) => {
-        const { token } = Cancellable(parentToken);
+        const { token } = createCancelToken(...[parentToken].filter(Boolean));
         return Promise.reject(input)
           ::token.then(NOT_CALLED, callback);
       };
@@ -235,7 +236,7 @@ describe('Cancellable', () => {
 
     describe('catch', () => {
       const run = (callback, { input, parentToken } = {}) => {
-        const { token } = Cancellable(parentToken);
+        const { token } = createCancelToken(...[parentToken].filter(Boolean));
         return Promise.reject(input)
           ::token.catch(callback);
       };
@@ -246,7 +247,7 @@ describe('Cancellable', () => {
 
     describe('ifaborted', () => {
       it('is called if aborted', () => {
-        const { token, abort } = Cancellable();
+        const { token, abort } = createCancelToken();
         abort();
         const callback = sinon.spy();
         return Promise.resolve()
@@ -258,7 +259,7 @@ describe('Cancellable', () => {
       });
 
       it('resolves with returned value if aborted', () => {
-        const { token, abort } = Cancellable();
+        const { token, abort } = createCancelToken();
         abort();
         const callback = sinon.stub().returns(SOME_VALUE);
         return Promise.resolve()
@@ -270,7 +271,7 @@ describe('Cancellable', () => {
       });
 
       it('rejects with thrown exception if aborted', () => {
-        const { token, abort } = Cancellable();
+        const { token, abort } = createCancelToken();
         abort();
         const callback = sinon.stub().throws(SOME_VALUE);
         return Promise.resolve()
@@ -282,7 +283,7 @@ describe('Cancellable', () => {
       });
 
       it('is not called if not aborted', () => {
-        const { token } = Cancellable();
+        const { token } = createCancelToken();
         const callback = sinon.spy();
         return Promise.resolve()
           ::token.ifaborted(callback)
@@ -294,7 +295,7 @@ describe('Cancellable', () => {
 
     describe('addAbortListener', () => {
       it('is called with abort error on abort', () => {
-        const { token, abort } = Cancellable();
+        const { token, abort } = createCancelToken();
         const listener = sinon.spy();
         token.addAbortListener(listener);
         expect(listener).to.not.have.been.called();
@@ -307,13 +308,13 @@ describe('Cancellable', () => {
 
   describe('propagate', () => {
     it('updates aborted', () => {
-      const { token, propagate } = Cancellable();
-      const { token: childToken, abort } = Cancellable(token);
-      abort();
+      const { token, abort } = createCancelToken();
+      const { token: childToken, abort: childAbort } = createCancelToken(token);
+      childAbort();
       const callback = sinon.spy();
       return Promise.resolve()
         ::childToken.then(NOOP)
-        ::propagate()
+        ::propagate(abort)
         ::token.catch(callback)
         .then(NOT_CALLED, (/* aborted */) => {
           expect(callback).to.not.have.been.called();
@@ -322,9 +323,9 @@ describe('Cancellable', () => {
     });
 
     it('doesn\'t update aborted if not called', () => {
-      const { token } = Cancellable();
-      const { token: childToken, abort } = Cancellable(token);
-      abort();
+      const { token } = createCancelToken();
+      const { token: childToken, abort: childAbort } = createCancelToken(token);
+      childAbort();
       const callback = sinon.spy();
       return Promise.resolve()
         ::childToken.then(NOOP)
@@ -337,15 +338,17 @@ describe('Cancellable', () => {
     });
 
     it('returns a promise', () => {
-      const { propagate } = Cancellable();
-      const promise = Promise.resolve()::propagate();
+      const { abort } = createCancelToken();
+      const promise = Promise.resolve()
+        ::propagate(abort);
       expect(promise).to.be.a(Promise);
     });
 
     const runSilent = () => {
-      const { abort, propagate } = Cancellable();
+      const { abort } = createCancelToken();
       abort();
-      return Promise.resolve()::propagate();
+      return Promise.resolve()
+        ::propagate(abort);
     };
 
     testSilent(runSilent);
