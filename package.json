@@ -23,7 +23,8 @@
   "keywords": [
     "cancellable",
     "promise",
-    "abort"
+    "abort",
+    "cancel"
   ],
   "author": "Jeremy Judeaux <jeremy.judeaux@volune.net>",
   "license": "MIT",

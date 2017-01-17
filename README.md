@@ -10,10 +10,10 @@ This library is based on the [This-Binding Syntax](https://github.com/tc39/propo
 ## Examples
 
 ```javascript
-import CancelToken, { Aborted } from 'cancellable-chain-of-promises';
+import CancelToken, { Cancelled } from 'cancellable-chain-of-promises';
 
-const token = new CancelToken((abort) => {
-    cancelButton.onclick = abort;
+const token = new CancelToken((cancel) => {
+    cancelButton.onclick = cancel;
 });
 
 // Write your asynchronous code:
@@ -22,7 +22,7 @@ const promise = Promise.resolve()
   ::token.then(doSomethingElse)
   ::token.catch(handleError);
 
-// If you abort, the "promise" object will reject with an Aborted exception.
+// If you cancel, the "promise" object will reject with an Cancelled error.
 ```
 
 
@@ -36,8 +36,8 @@ The `CancelToken` object is used to represent a cancellable operation.
 
 **Constructor**: `new CancelToken([callback] [, ...parentTokens])`
 
-- _callback_: A function that get the `abort` function as a parameter.
-- _parentTokens_: Tokens that will propagate their aborted state to this token.
+- _callback_: A function that get the `cancel` function as a parameter.
+- _parentTokens_: Tokens that will propagate their cancelled state to this token.
  
 **token.chain**:
 
@@ -45,15 +45,15 @@ An object providing several utility functions to chain promises in a cancellable
 
 **token.chain.then**: (alias: *token.then*) `promise::token.chain.then(onFulfilled[, onRejected])`
 
-Similar to `Promise.prototype.then`. If the token is in a aborted state, `onFulfilled` and `onRejected` will not be called, and the returned promise will reject with the Aborted error.
+Similar to `Promise.prototype.then`. If the token is in a cancelled state, `onFulfilled` and `onRejected` will not be called, and the returned promise will reject with the Cancelled error.
 
 **token.chain.catch**: (alias: *token.catch*) `promise::token.chain.catch(onRejected)`
 
-Similar to `Promise.prototype.catch`. If the token is in a aborted state, `onRejected` will not be called, and the returned promise will reject with the Aborted error.
+Similar to `Promise.prototype.catch`. If the token is in a cancelled state, `onRejected` will not be called, and the returned promise will reject with the Cancelled error.
 
-### Aborted
+### Cancelled
 
-An `Aborted` is used to represent the cancellation of an operation. It is the rejected value to propagate the cancellation through a chain of promises.
+An `Cancelled` is used to represent the cancellation of an operation. It is the rejected value to propagate the cancellation through a chain of promises.
 
 ### Utility functions
 
@@ -69,14 +69,14 @@ Use `always` to always call a callback in a chain of promises. The returned or t
 ```javascript
 const request = (url, { method, body, cancelToken }) => {
   const token = new CancelToken(cancelToken);
-  let abortListener;
+  let cancelListener;
   return new Promise(function (resolve, reject) {
     const xhr = new XMLHttpRequest();
-    abortListener = (abortError) => {
+    cancelListener = (cancelError) => {
       xhr.abort();
-      reject(abortError);
+      reject(cancelError);
     };
-    token.addAbortListener(abortListener);
+    token.addCancelListener(cancelListener);
     xhr.open(method, url);
     xhr.onload = function () {
       if (this.status >= 200 && this.status < 300) {
@@ -95,7 +95,7 @@ const request = (url, { method, body, cancelToken }) => {
       });
     };
     xhr.send(body);
-  })::always(() => token.removeAbortListener(abortListener))
+  })::always(() => token.removeCancelListener(cancelListener))
 };
 ```
 
@@ -130,13 +130,13 @@ const once = (builder) => {
 ```javascript
 class Widget {
   constructor() {
-    this.token = new CancelToken(abort => {
-      this.abort = abort;
+    this.token = new CancelToken(cancel => {
+      this.cancel = cancel;
     });
   }
 
   destroy() {
-    this.abort();
+    this.cancel();
   }
 
   onclick() {

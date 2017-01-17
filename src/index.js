@@ -1,21 +1,21 @@
 const NOOP = () => undefined;
-const ABORTED_MESSAGE = 'Aborted';
-export function Aborted() {
-  Error.call(this, ABORTED_MESSAGE);
-  this.message = ABORTED_MESSAGE;
+const CANCELLED_MESSAGE = 'Cancelled';
+export function Cancelled() {
+  Error.call(this, CANCELLED_MESSAGE);
+  this.message = CANCELLED_MESSAGE;
   if (typeof Error.captureStackTrace === 'function') {
-    Error.captureStackTrace(this, Aborted);
+    Error.captureStackTrace(this, Cancelled);
   } else {
-    this.stack = (new Error(ABORTED_MESSAGE)).stack;
+    this.stack = (new Error(CANCELLED_MESSAGE)).stack;
   }
 }
-Aborted.prototype = Object.create(Error.prototype);
-Aborted.prototype.name = 'Aborted';
+Cancelled.prototype = Object.create(Error.prototype);
+Cancelled.prototype.name = 'Cancelled';
 
-const isAborted = exception => exception instanceof Aborted;
-Aborted.isAborted = isAborted;
+const isCancelled = exception => exception instanceof Cancelled;
+Cancelled.isCancelled = isCancelled;
 
-const ABORT_ERROR = Symbol('abortError');
+const CANCEL_ERROR = Symbol('cancelError');
 const LISTENERS = Symbol('listeners');
 
 const safeCall = (callback, that, args) => {
@@ -28,16 +28,16 @@ const safeCall = (callback, that, args) => {
   }
 };
 
-const throwIfAborted = (token) => {
-  const abortError = token.abortError;
-  if (abortError) {
-    throw abortError;
+const throwIfCancelled = (token) => {
+  const cancelError = token.cancelError;
+  if (cancelError) {
+    throw cancelError;
   }
 };
 
 function silent() {
   const promise = this.catch((rejectedValue) => {
-    if (rejectedValue instanceof Aborted) {
+    if (rejectedValue instanceof Cancelled) {
       promise.catch(NOOP);
     }
     throw rejectedValue;
@@ -57,13 +57,13 @@ export function always(callback) {
   })::silent();
 }
 
-export function propagate(abort) {
-  if (typeof abort !== 'function') {
-    throw new Error('Invalid argument abort');
+export function propagate(cancel) {
+  if (typeof cancel !== 'function') {
+    throw new Error('Invalid argument cancel');
   }
   return this.catch((exception) => {
-    if (exception instanceof Aborted) {
-      abort(exception);
+    if (exception instanceof Cancelled) {
+      cancel(exception);
     }
     throw exception;
   })::silent();
@@ -72,7 +72,7 @@ export function propagate(abort) {
 const looksLikeAPromise = promise => (promise && typeof promise.then === 'function');
 
 const wrap = (token, handler) => function handle(...args) {
-  throwIfAborted(token);
+  throwIfCancelled(token);
   const result = handler.apply(this, args);
   if (!looksLikeAPromise(result)) {
     return result;
@@ -82,10 +82,10 @@ const wrap = (token, handler) => function handle(...args) {
     result,
     new Promise((resolve, reject) => {
       listener = reject;
-      token.addAbortListener(reject);
+      token.addCancelListener(reject);
     }),
   ])
-    ::always(() => token.removeAbortListener(listener));
+    ::always(() => token.removeCancelListener(listener));
 };
 
 const makeChainFunctions = token => ({
@@ -98,19 +98,19 @@ const makeChainFunctions = token => ({
   catch(rejectHandler) {
     return this.catch(wrap(token, rejectHandler))::silent();
   },
-  ifaborted(callback) {
+  ifcancelled(callback) {
     function handleResolve(value) {
-      const abortError = token.abortError;
-      if (abortError) {
-        return callback(abortError);
+      const cancelError = token.cancelError;
+      if (cancelError) {
+        return callback(cancelError);
       }
       return value;
     }
 
     function handleReject(exception) {
-      const abortError = token.abortError;
-      if (abortError) {
-        return callback(abortError);
+      const cancelError = token.cancelError;
+      if (cancelError) {
+        return callback(cancelError);
       }
       throw exception;
     }
@@ -128,62 +128,62 @@ export default class CancelToken {
       throw new Error('Invalid argument parentToken');
     }
 
-    this[ABORT_ERROR] = null;
+    this[CANCEL_ERROR] = null;
     this[LISTENERS] = [];
 
-    const abort = (newAbortError = undefined) => {
-      if (this[ABORT_ERROR] !== null) {
+    const cancel = (newCancelError = undefined) => {
+      if (this[CANCEL_ERROR] !== null) {
         return;
       }
-      const abortError = this[ABORT_ERROR] = newAbortError || new Aborted();
+      const cancelError = this[CANCEL_ERROR] = newCancelError || new Cancelled();
       parentTokens.forEach((parentToken) => {
-        parentToken.removeAbortListener(abort);
+        parentToken.removeCancelListener(cancel);
       });
       const listenersToCall = this[LISTENERS];
       this[LISTENERS] = [];
       listenersToCall.forEach((listener) => {
-        safeCall(listener, undefined, [abortError]);
+        safeCall(listener, undefined, [cancelError]);
       });
     };
 
     if (callback) {
-      callback(abort);
+      callback(cancel);
     }
 
     this.chain = makeChainFunctions(this);
     // alias chain functions on the token
     Object.assign(this, this.chain);
 
-    // Propagate aborted state from parent tokens
-    if (this[ABORT_ERROR] === null) {
+    // Propagate cancelled state from parent tokens
+    if (this[CANCEL_ERROR] === null) {
       parentTokens.some((parentToken) => {
-        if (parentToken.aborted) {
-          this[ABORT_ERROR] = parentToken.abortError;
+        if (parentToken.cancelled) {
+          this[CANCEL_ERROR] = parentToken.cancelError;
           return true;
         }
         return false;
       });
     }
-    // if not aborted yet, then listen to parent tokens
-    if (this[ABORT_ERROR] === null) {
+    // if not canceleld yet, then listen to parent tokens
+    if (this[CANCEL_ERROR] === null) {
       parentTokens.forEach((parentToken) => {
-        parentToken.addAbortListener(abort);
+        parentToken.addCancelListener(cancel);
       });
     }
   }
 
-  get abortError() {
-    return this[ABORT_ERROR];
+  get cancelError() {
+    return this[CANCEL_ERROR];
   }
 
-  get aborted() {
-    return Boolean(this[ABORT_ERROR]);
+  get cancelled() {
+    return Boolean(this[CANCEL_ERROR]);
   }
 
-  addAbortListener(listener) {
-    const abortError = this[ABORT_ERROR];
-    if (abortError) {
-      listener(abortError);
+  addCancelListener(listener) {
+    const cancelError = this[CANCEL_ERROR];
+    if (cancelError) {
+      listener(cancelError);
       return;
     }
     const listeners = this[LISTENERS];
@@ -192,7 +192,7 @@ export default class CancelToken {
     }
   }
 
-  removeAbortListener(listener) {
+  removeCancelListener(listener) {
     const listeners = this[LISTENERS];
     const listenerIndex = listeners.indexOf(listener);
     if (listenerIndex >= 0) {
@@ -203,17 +203,17 @@ export default class CancelToken {
 CancelToken.isCancelToken = token => token instanceof CancelToken;
 
 export const create = (...parentTokens) => {
-  let abort;
+  let cancel;
   const callback = typeof parentTokens[0] === 'function' ? parentTokens.shift() : undefined;
-  parentTokens.unshift((abortFunction) => {
-    abort = abortFunction;
+  parentTokens.unshift((cancelFunction) => {
+    cancel = cancelFunction;
     if (callback) {
-      callback(abortFunction);
+      callback(cancelFunction);
     }
   });
   const token = new CancelToken(...parentTokens);
   return {
     token,
-    abort,
+    cancel,
   };
 };
