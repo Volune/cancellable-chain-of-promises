@@ -102,27 +102,26 @@ const request = (url, { method, body, cancelToken }) => {
 ### Cancel Previous Operations
 
 ```javascript
-const once = (builder) => {
-  let previousCancel = null;
-  return function () {
-    let clean = null;
-    if (previousCancel) {
-      previousCancel();
-    }
-    const token = new CancelToken((cancel) => {
-      previousCancel = cancel;
-      clean = () => {
-        if (previousCancel === cancel) {
-          previousCancel = null;
-        }
-      }
-    });
-    const func = builder(token);
-    const result = func.apply(this, arguments);
-    Promise.resolve(result)::token.always(clean);
-    return result;
+let previousCancel = null;
+function example() {
+  let clean = null;
+  if (previousCancel) {
+    previousCancel();
   }
-};
+
+  const token = new CancelToken((cancel) => {
+    previousCancel = cancel;
+    clean = () => {
+      if (previousCancel === cancel) {
+        previousCancel = null;
+      }
+    };
+  });
+
+  request('/example', {cancelToken: this.token})
+    ::this.token.chain.then(response => processResponse(response))
+    ::always(clean);
+}
 ```
 
 ### Cancel Operations When Removing a Widget
@@ -141,13 +140,28 @@ class Widget {
 
   onclick() {
     request('/random', {cancelToken: this.token})
-      ::this.token.then(response => response.json())
-      ::this.token.then(response => this.updateState(response));
+      ::this.token.chain.then(response => this.updateState(response));
   }
 
   // other methods ...
 }
 ```
 
+### Cancellable setTimeout
 
+```javascript
+const setCancellableTimeout = (fn, duration, token) => {
+  if (!token.aborted) {
+    let id = 0;
+    const cancel = () => {
+      cancelTimeout(id);
+      token.removeCancelListener(cancel);
+    };
+    id = setTimeout(() => {
+      token.removeCancelListener(cancel);
+      fn();
+    }, duration);
+  }
+};
+```
 
