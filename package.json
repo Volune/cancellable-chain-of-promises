@@ -15,7 +15,7 @@
   "scripts": {
     "build": "babel -s -d lib src",
     "eslint": "eslint .",
-    "mocha": "mocha --compilers js:babel-core/register test/test.js",
+    "mocha": "mocha --compilers js:babel-core/register test/*.js",
     "prepublish": "npm run build",
     "test": "npm run-script eslint && npm run-script mocha"
   },
