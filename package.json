@@ -1,6 +1,6 @@
 {
   "name": "cancellable-chain-of-promises",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Library to write cancellable chain of Promises, using the This-Binding Syntax proposal.",
   "main": "./lib/index.js",
   "directories": {
