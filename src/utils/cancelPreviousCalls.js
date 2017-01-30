@@ -1,4 +1,4 @@
-import CancelToken from '../index';
+import CancelToken, { always } from '../index';
 
 const cancelPreviousCalls = (builder) => {
   let previousCancel = null;
@@ -17,7 +17,7 @@ const cancelPreviousCalls = (builder) => {
     });
     const func = builder(token);
     const result = func.apply(this, arts);
-    Promise.resolve(result)::token.always(clean);
+    always.call(Promise.resolve(result), clean);
     return result;
   };
 };
