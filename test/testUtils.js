@@ -2,8 +2,11 @@
 import expect from 'must';
 import sinon from 'sinon';
 import CancelToken, { create as createCancelToken } from '../src/index';
+import cancelPreviousCalls from '../src/utils/cancelPreviousCalls';
 import setCancellableTimeout from '../src/utils/setCancellableTimeout';
 import setCancellableInterval from '../src/utils/setCancellableInterval';
+
+const NOOP = () => undefined;
 
 describe('setCancellableTimeout', () => {
   it('calls callback if not cancelled', (done) => {
@@ -123,5 +126,40 @@ describe('setCancellableInterval', () => {
       expect(callback).to.not.have.been.called();
       done();
     }, 5);
+  });
+});
+
+describe('cancelPreviousCalls', () => {
+  it('provides a token', () => {
+    const builder = sinon.stub().returns(NOOP);
+    const func = cancelPreviousCalls(builder);
+    func();
+    expect(builder).to.have.been.calledOnce();
+    expect(builder).to.have.been.calledWith(sinon.match.instanceOf(CancelToken));
+  });
+
+  it('cancels previous token on next call', () => {
+    const tokens = [];
+    const func = cancelPreviousCalls((token) => {
+      tokens.push(token);
+      return NOOP;
+    });
+    func();
+    func();
+    expect(tokens).to.have.length(2);
+    expect(tokens[0].cancelled).to.be.true();
+    expect(tokens[1].cancelled).to.be.false();
+  });
+
+  it('passes arguments and returne value', () => {
+    const SOME_ARG = { someArg: true };
+    const SOME_ARG_2 = { someArg2: true };
+    const SOME_RESULT = { someResult: true };
+    const spy = sinon.stub().returns(SOME_RESULT);
+    const func = cancelPreviousCalls(() => spy);
+    const returnedValue = func(SOME_ARG, SOME_ARG_2);
+    expect(spy).to.have.been.calledOnce();
+    expect(spy).to.have.been.calledWithExactly(SOME_ARG, SOME_ARG_2);
+    expect(returnedValue).to.equal(SOME_RESULT);
   });
 });
