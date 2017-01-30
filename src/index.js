@@ -35,18 +35,18 @@ const throwIfCancelled = (token) => {
   }
 };
 
-function silent() {
-  const promise = this.catch((rejectedValue) => {
+function silence(promise) {
+  const returnedPromise = promise.catch((rejectedValue) => {
     if (rejectedValue instanceof Cancelled) {
-      promise.catch(NOOP);
+      returnedPromise.catch(NOOP);
     }
     throw rejectedValue;
   });
-  return promise;
+  return returnedPromise;
 }
 
 export function always(callback) {
-  return this.then(function alwaysThen(resolvedValue) {
+  const returnedPromise = this.then(function alwaysThen(resolvedValue) {
     // Put rejected value first to promote error handling
     safeCall(callback, this, [undefined, resolvedValue]);
     return resolvedValue;
@@ -54,19 +54,21 @@ export function always(callback) {
     // Put rejected value first to promote error handling
     safeCall(callback, this, [rejectedValue, undefined]);
     throw rejectedValue;
-  })::silent();
+  });
+  return silence(returnedPromise);
 }
 
 export function propagate(cancel) {
   if (typeof cancel !== 'function') {
     throw new Error('Invalid argument cancel');
   }
-  return this.catch((exception) => {
+  const returnedPromise = this.catch((exception) => {
     if (exception instanceof Cancelled) {
       cancel(exception);
     }
     throw exception;
-  })::silent();
+  });
+  return silence(returnedPromise);
 }
 
 const looksLikeAPromise = promise => (promise && typeof promise.then === 'function');
@@ -78,25 +80,29 @@ const wrap = (token, handler) => function handle(...args) {
     return result;
   }
   let listener;
-  return Promise.race([
+  const returnedPromise = Promise.race([
     result,
     new Promise((resolve, reject) => {
       listener = reject;
       token.addCancelListener(reject);
     }),
-  ])
-    ::always(() => token.removeCancelListener(listener));
+  ]);
+  return always.call(returnedPromise, () => token.removeCancelListener(listener));
 };
 
 const makeChainFunctions = token => ({
   then(resolveHandler, rejectHandler) {
+    let returnedPromise;
     if (rejectHandler) {
-      return this.then(wrap(token, resolveHandler), wrap(token, rejectHandler))::silent();
+      returnedPromise = this.then(wrap(token, resolveHandler), wrap(token, rejectHandler));
+    } else {
+      returnedPromise = this.then(wrap(token, resolveHandler));
     }
-    return this.then(wrap(token, resolveHandler))::silent();
+    return silence(returnedPromise);
   },
   catch(rejectHandler) {
-    return this.catch(wrap(token, rejectHandler))::silent();
+    const returnedPromise = this.catch(wrap(token, rejectHandler));
+    return silence(returnedPromise);
   },
   ifcancelled(callback) {
     function handleResolve(value) {
