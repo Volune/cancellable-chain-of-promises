@@ -4,7 +4,8 @@
 
 A library to write cancellable chain of promises.
 
-This library is based on the [This-Binding Syntax](https://github.com/tc39/proposal-bind-operator) proposal.
+This library is inspired by the [This-Binding Syntax](https://github.com/tc39/proposal-bind-operator) proposal.
+If you don't want to depend on this proposal, you can have a look at the [like-bind-operator]() library.
 
 
 ## Examples
@@ -21,6 +22,25 @@ const promise = Promise.resolve()
   ::token.then(doSomething)
   ::token.then(doSomethingElse)
   ::token.catch(handleError);
+
+// If you cancel, the "promise" object will reject with an Cancelled error.
+```
+
+#### Using `like-bind-operator`
+
+```javascript
+import CancelToken, { Cancelled } from 'cancellable-chain-of-promises';
+import $ from 'like-bind-operator';
+
+const token = new CancelToken((cancel) => {
+    cancelButton.onclick = cancel;
+});
+
+// Write your asynchronous code:
+const promise = Promise.resolve()
+  [$](token.then)(doSomething)
+  [$](token.then)(doSomethingElse)
+  [$](token.catch)(handleError);
 
 // If you cancel, the "promise" object will reject with an Cancelled error.
 ```
