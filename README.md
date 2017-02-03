@@ -18,7 +18,7 @@ const token = new CancelToken((cancel) => {
 });
 
 // Write your asynchronous code:
-const promise = Promise.resolve()
+const promise = token.resolve()
   ::token.then(doSomething)
   ::token.then(doSomethingElse)
   ::token.catch(handleError);
@@ -37,7 +37,7 @@ const token = new CancelToken((cancel) => {
 });
 
 // Write your asynchronous code:
-const promise = Promise.resolve()
+const promise = token.resolve()
   [$](token.then)(doSomething)
   [$](token.then)(doSomethingElse)
   [$](token.catch)(handleError);
@@ -70,6 +70,18 @@ Similar to `Promise.prototype.then`. If the token is in a cancelled state, `onFu
 **token.chain.catch**: (alias: *token.catch*) `promise::token.chain.catch(onRejected)`
 
 Similar to `Promise.prototype.catch`. If the token is in a cancelled state, `onRejected` will not be called, and the returned promise will reject with the Cancelled error.
+
+**token.newPromise**: `token.newPromise((resolve, reject) => {})`
+
+A Promise factory, that returns a rejected Promise if the token is cancelled, or construct a new Promise. The callback is not called is the token is cancelled.
+
+**token.resolve**: `token.resolve(value)`
+
+A function that returns a rejected Promise if the token is cancelled, or a Promise resolved with the given value.
+
+**token.reject**: `token.reject(value)`
+
+A function that returns a rejected Promise if the token is cancelled, or a Promise rejected with the given value.
 
 ### Cancelled
 

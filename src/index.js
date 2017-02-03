@@ -205,6 +205,27 @@ export default class CancelToken {
       listeners.splice(listenerIndex, 1);
     }
   }
+
+  newPromise(...args) {
+    if (this.cancelError) {
+      return Promise.reject(this.cancelError);
+    }
+    return new Promise(...args);
+  }
+
+  resolve(...args) {
+    if (this.cancelError) {
+      return Promise.reject(this.cancelError);
+    }
+    return Promise.resolve(...args);
+  }
+
+  reject(...args) {
+    if (this.cancelError) {
+      return Promise.reject(this.cancelError);
+    }
+    return Promise.reject(...args);
+  }
 }
 CancelToken.isCancelToken = token => token instanceof CancelToken;
 

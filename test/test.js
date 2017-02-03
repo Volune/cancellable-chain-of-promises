@@ -2,12 +2,7 @@
 import expect from 'must';
 import sinon from 'sinon';
 import configureMustSinon from 'must-sinon';
-import {
-  Cancelled,
-  create as createCancelToken,
-  propagate,
-  always,
-} from '../src/index';
+import { Cancelled, create as createCancelToken, propagate, always } from '../src/index';
 
 configureMustSinon(expect);
 
@@ -216,80 +211,82 @@ describe('createCancelToken', () => {
   });
 
   describe('token', () => {
-    describe('then', () => {
-      const run = (callback, { input, parentToken } = {}) => {
-        const { token } = createCancelToken(...[parentToken].filter(Boolean));
-        return Promise.resolve(input)
-          ::token.then(callback);
-      };
+    describe('chain', () => {
+      describe('then', () => {
+        const run = (callback, { input, parentToken } = {}) => {
+          const { token } = createCancelToken(...[parentToken].filter(Boolean));
+          return Promise.resolve(input)
+            ::token.then(callback);
+        };
 
-      const runRejection = (callback, { input, parentToken } = {}) => {
-        const { token } = createCancelToken(...[parentToken].filter(Boolean));
-        return Promise.reject(input)
-          ::token.then(NOT_CALLED, callback);
-      };
+        const runRejection = (callback, { input, parentToken } = {}) => {
+          const { token } = createCancelToken(...[parentToken].filter(Boolean));
+          return Promise.reject(input)
+            ::token.then(NOT_CALLED, callback);
+        };
 
-      testThenCatch(run);
-      testCallback(run);
-      testCallback(runRejection, 'rejection callback');
-    });
-
-    describe('catch', () => {
-      const run = (callback, { input, parentToken } = {}) => {
-        const { token } = createCancelToken(...[parentToken].filter(Boolean));
-        return Promise.reject(input)
-          ::token.catch(callback);
-      };
-
-      testThenCatch(run);
-      testCallback(run);
-    });
-
-    describe('ifcancelled', () => {
-      it('is called if cancelled', () => {
-        const { token, cancel } = createCancelToken();
-        cancel();
-        const callback = sinon.spy();
-        return Promise.resolve()
-          ::token.ifcancelled(callback)
-          .then(() => {
-            expect(callback).to.have.been.calledOnce();
-            expect(callback).to.have.been.calledWithExactly(sinon.match.instanceOf(Cancelled));
-          });
+        testThenCatch(run);
+        testCallback(run);
+        testCallback(runRejection, 'rejection callback');
       });
 
-      it('resolves with returned value if cancelled', () => {
-        const { token, cancel } = createCancelToken();
-        cancel();
-        const callback = sinon.stub().returns(SOME_VALUE);
-        return Promise.resolve()
-          ::token.ifcancelled(callback)
-          .then((value) => {
-            expect(callback).to.have.been.calledOnce();
-            expect(value).to.equal(SOME_VALUE);
-          });
+      describe('catch', () => {
+        const run = (callback, { input, parentToken } = {}) => {
+          const { token } = createCancelToken(...[parentToken].filter(Boolean));
+          return Promise.reject(input)
+            ::token.catch(callback);
+        };
+
+        testThenCatch(run);
+        testCallback(run);
       });
 
-      it('rejects with thrown exception if cancelled', () => {
-        const { token, cancel } = createCancelToken();
-        cancel();
-        const callback = sinon.stub().throws(SOME_VALUE);
-        return Promise.resolve()
-          ::token.ifcancelled(callback)
-          .then(NOT_CALLED, (exception) => {
-            expect(callback).to.have.been.calledOnce();
-            expect(exception).to.equal(SOME_VALUE);
-          });
-      });
+      describe('ifcancelled', () => {
+        it('is called if cancelled', () => {
+          const { token, cancel } = createCancelToken();
+          cancel();
+          const callback = sinon.spy();
+          return Promise.resolve()
+            ::token.ifcancelled(callback)
+            .then(() => {
+              expect(callback).to.have.been.calledOnce();
+              expect(callback).to.have.been.calledWithExactly(sinon.match.instanceOf(Cancelled));
+            });
+        });
 
-      it('is not called if not cancelled', () => {
-        const { token } = createCancelToken();
-        const callback = sinon.spy();
-        return Promise.resolve()
-          ::token.ifcancelled(callback)
-          .then(() => {
-            expect(callback).to.not.have.been.called();
-          });
+        it('resolves with returned value if cancelled', () => {
+          const { token, cancel } = createCancelToken();
+          cancel();
+          const callback = sinon.stub().returns(SOME_VALUE);
+          return Promise.resolve()
+            ::token.ifcancelled(callback)
+            .then((value) => {
+              expect(callback).to.have.been.calledOnce();
+              expect(value).to.equal(SOME_VALUE);
+            });
+        });
+
+        it('rejects with thrown exception if cancelled', () => {
+          const { token, cancel } = createCancelToken();
+          cancel();
+          const callback = sinon.stub().throws(SOME_VALUE);
+          return Promise.resolve()
+            ::token.ifcancelled(callback)
+            .then(NOT_CALLED, (exception) => {
+              expect(callback).to.have.been.calledOnce();
+              expect(exception).to.equal(SOME_VALUE);
+            });
+        });
+
+        it('is not called if not cancelled', () => {
+          const { token } = createCancelToken();
+          const callback = sinon.spy();
+          return Promise.resolve()
+            ::token.ifcancelled(callback)
+            .then(() => {
+              expect(callback).to.not.have.been.called();
+            });
+        });
       });
     });
 
@@ -302,6 +299,78 @@ describe('createCancelToken', () => {
         cancel();
         expect(listener).to.have.been.calledOnce();
         expect(listener).to.have.been.calledWithExactly(sinon.match.instanceOf(Cancelled));
+      });
+    });
+
+    describe('newPromise', () => {
+      it('returns a new Promise using the callback if not cancelled', () => {
+        const callback = sinon.spy();
+        const { token } = createCancelToken();
+        const promise = token.newPromise(callback);
+        expect(promise).to.be.a(Promise);
+        expect(callback).to.have.been.calledOnce();
+      });
+
+      it('returns a new Promise that resolves from callback', () => {
+        const callback = sinon.stub().callsArgWith(0, SOME_VALUE);
+        const { token } = createCancelToken();
+        const promise = token.newPromise(callback);
+        expect(promise).to.be.a(Promise);
+        expect(callback).to.have.been.calledOnce();
+        return expect(promise).to.resolve.to.equal(SOME_VALUE);
+      });
+
+      it('returns a new Promise that rejects from callback', () => {
+        const callback = sinon.stub().callsArgWith(1, SOME_VALUE);
+        const { token } = createCancelToken();
+        const promise = token.newPromise(callback);
+        expect(promise).to.be.a(Promise);
+        expect(callback).to.have.been.calledOnce();
+        return expect(promise).to.reject.to.equal(SOME_VALUE);
+      });
+
+      it('doesn\'t call callback and return a Promise rejected with Cancelled exception if cancelled', () => {
+        const callback = sinon.stub().callsArgWith(0, SOME_VALUE);
+        const { token, cancel } = createCancelToken();
+        cancel();
+        const promise = token.newPromise(callback);
+        expect(promise).to.be.a(Promise);
+        expect(callback).to.not.have.been.called();
+        return expect(promise).to.reject.to.instanceof(Cancelled);
+      });
+    });
+
+    describe('resolve', () => {
+      it('returns a Promise resolved to the given value', () => {
+        const { token } = createCancelToken();
+        const promise = token.resolve(SOME_VALUE);
+        expect(promise).to.be.a(Promise);
+        return expect(promise).to.resolve.to.equal(SOME_VALUE);
+      });
+
+      it('return a rejected Promise with Cancelled exception if cancelled', () => {
+        const { token, cancel } = createCancelToken();
+        cancel();
+        const promise = token.resolve(SOME_VALUE);
+        expect(promise).to.be.a(Promise);
+        return expect(promise).to.reject.to.instanceof(Cancelled);
+      });
+    });
+
+    describe('reject', () => {
+      it('returns a Promise rejected to the given value', () => {
+        const { token } = createCancelToken();
+        const promise = token.resolve(SOME_VALUE);
+        expect(promise).to.be.a(Promise);
+        return expect(promise).to.resolve.to.equal(SOME_VALUE);
+      });
+
+      it('return a Promise rejected with Cancelled exception if cancelled', () => {
+        const { token, cancel } = createCancelToken();
+        cancel();
+        const promise = token.resolve(SOME_VALUE);
+        expect(promise).to.be.a(Promise);
+        return expect(promise).to.reject.to.instanceof(Cancelled);
       });
     });
   });
