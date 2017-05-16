@@ -2,7 +2,8 @@
 import expect from 'must';
 import sinon from 'sinon';
 import configureMustSinon from 'must-sinon';
-import { Cancelled, create as createCancelToken, propagate, always } from '../src/index';
+import { CancellationTokenSource, CancellationToken } from 'prex';
+import makeChain, { Cancelled, propagate, always } from '../src/index';
 
 configureMustSinon(expect);
 
@@ -44,9 +45,7 @@ const testThenCatch = (run) => {
   });
 
   const runSilent = () => {
-    const { token: parentToken, cancel } = createCancelToken();
-    cancel();
-    run(NOOP, { parentToken });
+    run(NOOP, { parentToken: CancellationToken.canceled });
   };
 
   testSilent(runSilent);
@@ -63,10 +62,8 @@ const testCallback = (run, callbackName = 'callback') => {
   });
 
   it(`rejects Cancelled exception instead of calling ${callbackName} if cancelled`, () => {
-    const { token: parentToken, cancel } = createCancelToken();
-    cancel();
     const callback = sinon.spy();
-    return run(callback, { parentToken })
+    return run(callback, { parentToken: CancellationToken.canceled })
       .then(NOT_CALLED, (exception) => {
         expect(callback).to.not.have.been.called();
         expect(exception).to.be.a(Cancelled);
@@ -93,16 +90,16 @@ const testCallback = (run, callbackName = 'callback') => {
 
   it(`doesn't wait for ${callbackName} to complete if cancelled`, () => {
     const callback = sinon.stub().returns(new Promise(NOOP));
-    const { token: parentToken, cancel } = createCancelToken();
+    const source = new CancellationTokenSource();
     const promise = Promise.race([
-      run(callback, { parentToken }),
+      run(callback, { parentToken: source.token }),
       timeout(100),
     ])
       .then(NOT_CALLED, (value) => {
         expect(callback).to.have.been.calledOnce();
         expect(value).to.be.a(Cancelled);
       });
-    setTimeout(cancel, 10);
+    setTimeout(() => source.cancel(), 10);
     return promise;
   });
 
@@ -124,33 +121,7 @@ const testCallback = (run, callbackName = 'callback') => {
   });
 };
 
-describe('createCancelToken', () => {
-  it('returns a token object and an cancel function', () => {
-    const { token, cancel } = createCancelToken();
-    expect(token).to.be.an.object();
-    expect(token.cancelled).to.be.a.boolean();
-    expect(token.then).to.be.a.function();
-    expect(token.catch).to.be.a.function();
-    expect(cancel).to.be.a.function();
-  });
-
-  describe('cancel', () => {
-    it('updates the token', () => {
-      const { token, cancel } = createCancelToken();
-      expect(token.cancelled).to.be.false();
-      cancel();
-      expect(token.cancelled).to.be.true();
-    });
-
-    it('propagates to child token', () => {
-      const { token: parentToken, cancel } = createCancelToken();
-      const { token } = createCancelToken(parentToken);
-      expect(token.cancelled).to.be.false();
-      cancel();
-      expect(token.cancelled).to.be.true();
-    });
-  });
-
+describe('cancellable-chain-of-promises', () => {
   describe('always', () => {
     it('is called with resolved value', () => {
       const callback = sinon.spy();
@@ -173,11 +144,10 @@ describe('createCancelToken', () => {
     });
 
     it('is still called after then with cancelled exception', () => {
-      const { token, cancel } = createCancelToken();
-      cancel();
+      const chain = makeChain(CancellationToken.canceled);
       const callback = sinon.spy();
       return Promise.resolve()
-        ::token.then(NOT_CALLED)
+        ::chain.then(NOT_CALLED)
         ::always(callback)
         .then(NOT_CALLED, (cancelledError) => {
           expect(cancelledError).to.be.a(Cancelled);
@@ -187,11 +157,10 @@ describe('createCancelToken', () => {
     });
 
     it('is still called after catch with cancelled exception', () => {
-      const { token, cancel } = createCancelToken();
-      cancel();
+      const chain = makeChain(CancellationToken.canceled);
       const callback = sinon.spy();
       return Promise.reject()
-        ::token.catch(NOT_CALLED)
+        ::chain.catch(NOT_CALLED)
         ::always(callback)
         .then(NOT_CALLED, (cancelledError) => {
           expect(cancelledError).to.be.a(Cancelled);
@@ -200,12 +169,8 @@ describe('createCancelToken', () => {
         });
     });
 
-    const runSilent = () => {
-      const { token, cancel } = createCancelToken();
-      cancel();
-      return Promise.reject(token.cancelError)
-        ::always(NOOP);
-    };
+    const runSilent = () =>
+      (Promise.reject(new Cancelled(CancellationToken.canceled))::always(NOOP));
 
     testSilent(runSilent);
   });
@@ -213,16 +178,16 @@ describe('createCancelToken', () => {
   describe('token', () => {
     describe('chain', () => {
       describe('then', () => {
-        const run = (callback, { input, parentToken } = {}) => {
-          const { token } = createCancelToken(...[parentToken].filter(Boolean));
+        const run = (callback, { input, parentToken = CancellationToken.none } = {}) => {
+          const chain = makeChain(parentToken);
           return Promise.resolve(input)
-            ::token.then(callback);
+            ::chain.then(callback);
         };
 
-        const runRejection = (callback, { input, parentToken } = {}) => {
-          const { token } = createCancelToken(...[parentToken].filter(Boolean));
+        const runRejection = (callback, { input, parentToken = CancellationToken.none } = {}) => {
+          const chain = makeChain(parentToken);
           return Promise.reject(input)
-            ::token.then(NOT_CALLED, callback);
+            ::chain.then(NOT_CALLED, callback);
         };
 
         testThenCatch(run);
@@ -231,10 +196,10 @@ describe('createCancelToken', () => {
       });
 
       describe('catch', () => {
-        const run = (callback, { input, parentToken } = {}) => {
-          const { token } = createCancelToken(...[parentToken].filter(Boolean));
+        const run = (callback, { input, parentToken = CancellationToken.none } = {}) => {
+          const chain = makeChain(parentToken);
           return Promise.reject(input)
-            ::token.catch(callback);
+            ::chain.catch(callback);
         };
 
         testThenCatch(run);
@@ -243,23 +208,22 @@ describe('createCancelToken', () => {
 
       describe('ifcancelled', () => {
         it('is called if cancelled', () => {
-          const { token, cancel } = createCancelToken();
-          cancel();
+          const chain = makeChain(CancellationToken.canceled);
           const callback = sinon.spy();
           return Promise.resolve()
-            ::token.ifcancelled(callback)
+            ::chain.ifcancelled(callback)
             .then(() => {
               expect(callback).to.have.been.calledOnce();
-              expect(callback).to.have.been.calledWithExactly(sinon.match.instanceOf(Cancelled));
+              expect(callback).to.have.been.calledWithExactly(
+                sinon.match.instanceOf(CancellationToken));
             });
         });
 
         it('resolves with returned value if cancelled', () => {
-          const { token, cancel } = createCancelToken();
-          cancel();
+          const chain = makeChain(CancellationToken.canceled);
           const callback = sinon.stub().returns(SOME_VALUE);
           return Promise.resolve()
-            ::token.ifcancelled(callback)
+            ::chain.ifcancelled(callback)
             .then((value) => {
               expect(callback).to.have.been.calledOnce();
               expect(value).to.equal(SOME_VALUE);
@@ -267,11 +231,10 @@ describe('createCancelToken', () => {
         });
 
         it('rejects with thrown exception if cancelled', () => {
-          const { token, cancel } = createCancelToken();
-          cancel();
+          const chain = makeChain(CancellationToken.canceled);
           const callback = sinon.stub().throws(SOME_VALUE);
           return Promise.resolve()
-            ::token.ifcancelled(callback)
+            ::chain.ifcancelled(callback)
             .then(NOT_CALLED, (exception) => {
               expect(callback).to.have.been.calledOnce();
               expect(exception).to.equal(SOME_VALUE);
@@ -279,10 +242,10 @@ describe('createCancelToken', () => {
         });
 
         it('is not called if not cancelled', () => {
-          const { token } = createCancelToken();
+          const chain = makeChain(CancellationToken.none);
           const callback = sinon.spy();
           return Promise.resolve()
-            ::token.ifcancelled(callback)
+            ::chain.ifcancelled(callback)
             .then(() => {
               expect(callback).to.not.have.been.called();
             });
@@ -290,31 +253,19 @@ describe('createCancelToken', () => {
       });
     });
 
-    describe('addCancelListener', () => {
-      it('is called with cancel error on cancel', () => {
-        const { token, cancel } = createCancelToken();
-        const listener = sinon.spy();
-        token.addCancelListener(listener);
-        expect(listener).to.not.have.been.called();
-        cancel();
-        expect(listener).to.have.been.calledOnce();
-        expect(listener).to.have.been.calledWithExactly(sinon.match.instanceOf(Cancelled));
-      });
-    });
-
     describe('newPromise', () => {
       it('returns a new Promise using the callback if not cancelled', () => {
         const callback = sinon.spy();
-        const { token } = createCancelToken();
-        const promise = token.newPromise(callback);
+        const chain = makeChain(CancellationToken.none);
+        const promise = chain.newPromise(callback);
         expect(promise).to.be.a(Promise);
         expect(callback).to.have.been.calledOnce();
       });
 
       it('returns a new Promise that resolves from callback', () => {
         const callback = sinon.stub().callsArgWith(0, SOME_VALUE);
-        const { token } = createCancelToken();
-        const promise = token.newPromise(callback);
+        const chain = makeChain(CancellationToken.none);
+        const promise = chain.newPromise(callback);
         expect(promise).to.be.a(Promise);
         expect(callback).to.have.been.calledOnce();
         return expect(promise).to.resolve.to.equal(SOME_VALUE);
@@ -322,8 +273,8 @@ describe('createCancelToken', () => {
 
       it('returns a new Promise that rejects from callback', () => {
         const callback = sinon.stub().callsArgWith(1, SOME_VALUE);
-        const { token } = createCancelToken();
-        const promise = token.newPromise(callback);
+        const chain = makeChain(CancellationToken.none);
+        const promise = chain.newPromise(callback);
         expect(promise).to.be.a(Promise);
         expect(callback).to.have.been.calledOnce();
         return expect(promise).to.reject.to.equal(SOME_VALUE);
@@ -331,9 +282,8 @@ describe('createCancelToken', () => {
 
       it('doesn\'t call callback and return a Promise rejected with Cancelled exception if cancelled', () => {
         const callback = sinon.stub().callsArgWith(0, SOME_VALUE);
-        const { token, cancel } = createCancelToken();
-        cancel();
-        const promise = token.newPromise(callback);
+        const chain = makeChain(CancellationToken.canceled);
+        const promise = chain.newPromise(callback);
         expect(promise).to.be.a(Promise);
         expect(callback).to.not.have.been.called();
         return expect(promise).to.reject.to.instanceof(Cancelled);
@@ -342,16 +292,15 @@ describe('createCancelToken', () => {
 
     describe('resolve', () => {
       it('returns a Promise resolved to the given value', () => {
-        const { token } = createCancelToken();
-        const promise = token.resolve(SOME_VALUE);
+        const chain = makeChain(CancellationToken.none);
+        const promise = chain.resolve(SOME_VALUE);
         expect(promise).to.be.a(Promise);
         return expect(promise).to.resolve.to.equal(SOME_VALUE);
       });
 
       it('return a rejected Promise with Cancelled exception if cancelled', () => {
-        const { token, cancel } = createCancelToken();
-        cancel();
-        const promise = token.resolve(SOME_VALUE);
+        const chain = makeChain(CancellationToken.canceled);
+        const promise = chain.resolve(SOME_VALUE);
         expect(promise).to.be.a(Promise);
         return expect(promise).to.reject.to.instanceof(Cancelled);
       });
@@ -359,16 +308,15 @@ describe('createCancelToken', () => {
 
     describe('reject', () => {
       it('returns a Promise rejected to the given value', () => {
-        const { token } = createCancelToken();
-        const promise = token.resolve(SOME_VALUE);
+        const chain = makeChain(CancellationToken.none);
+        const promise = chain.resolve(SOME_VALUE);
         expect(promise).to.be.a(Promise);
         return expect(promise).to.resolve.to.equal(SOME_VALUE);
       });
 
       it('return a Promise rejected with Cancelled exception if cancelled', () => {
-        const { token, cancel } = createCancelToken();
-        cancel();
-        const promise = token.resolve(SOME_VALUE);
+        const chain = makeChain(CancellationToken.canceled);
+        const promise = chain.resolve(SOME_VALUE);
         expect(promise).to.be.a(Promise);
         return expect(promise).to.reject.to.instanceof(Cancelled);
       });
@@ -377,47 +325,47 @@ describe('createCancelToken', () => {
 
   describe('propagate', () => {
     it('updates cancelled', () => {
-      const { token, cancel } = createCancelToken();
-      const { token: childToken, cancel: childCancel } = createCancelToken(token);
-      childCancel();
+      const source = new CancellationTokenSource();
+      const chain = makeChain(source.token);
+      const childChain = makeChain(CancellationToken.canceled);
       const callback = sinon.spy();
       return Promise.resolve()
-        ::childToken.then(NOOP)
-        ::propagate(cancel)
-        ::token.catch(callback)
+        ::childChain.then(NOOP)
+        ::propagate(source)
+        ::chain.catch(callback)
         .then(NOT_CALLED, (/* cancelled */) => {
           expect(callback).to.not.have.been.called();
-          expect(token.cancelled).to.be.true();
+          expect(source.token.cancellationRequested).to.be.true();
         });
     });
 
     it('doesn\'t update cancelled if not called', () => {
-      const { token } = createCancelToken();
-      const { token: childToken, cancel: childCancel } = createCancelToken(token);
-      childCancel();
+      const source = new CancellationTokenSource();
+      const chain = makeChain(source.token);
+      const childChain = makeChain(CancellationToken.canceled);
       const callback = sinon.spy();
       return Promise.resolve()
-        ::childToken.then(NOOP)
-        ::token.catch(callback)
+        ::childChain.then(NOOP)
+        ::chain.catch(callback)
         .then(() => {
           expect(callback).to.have.been.calledOnce();
           expect(callback).to.have.been.calledWithExactly(sinon.match.instanceOf(Cancelled));
-          expect(token.cancelled).to.be.false();
+          expect(source.token.cancellationRequested).to.be.false();
         });
     });
 
     it('returns a promise', () => {
-      const { cancel } = createCancelToken();
+      const source = new CancellationTokenSource();
       const promise = Promise.resolve()
-        ::propagate(cancel);
+        ::propagate(source);
       expect(promise).to.be.a(Promise);
     });
 
     const runSilent = () => {
-      const { cancel } = createCancelToken();
-      cancel();
+      const source = new CancellationTokenSource();
+      source.cancel();
       return Promise.resolve()
-        ::propagate(cancel);
+        ::propagate(source);
     };
 
     testSilent(runSilent);

@@ -8,12 +8,13 @@ const setCancellableInterval = (callback, delayParam = +Infinity, tokenParam = u
   if (!token) {
     return setInterval(callback, delay);
   }
-  let id;
-  const listener = () => clearTimeout(id);
-  id = setInterval(function onTimeout(...args) {
+  if (token.cancellationRequested) {
+    return undefined;
+  }
+  const id = setInterval(function onTimeout(...args) {
     callback.apply(this, args);
   }, delayParam);
-  tokenParam.addCancelListener(listener);
+  token.register(() => clearInterval(id));
   return id;
 };
 

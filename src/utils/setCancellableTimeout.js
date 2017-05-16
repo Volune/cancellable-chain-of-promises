@@ -8,13 +8,15 @@ const setCancellableTimeout = (callback, delayParam = 0, tokenParam = undefined)
   if (!token) {
     return setTimeout(callback, delay);
   }
+  if (token.cancellationRequested) {
+    return undefined;
+  }
   let id;
-  const listener = () => clearTimeout(id);
+  const registration = token.register(() => clearTimeout(id));
   id = setTimeout(function onTimeout(...args) {
-    tokenParam.removeCancelListener(listener);
+    registration.unregister();
     callback.apply(this, args);
   }, delayParam);
-  tokenParam.addCancelListener(listener);
   return id;
 };
 

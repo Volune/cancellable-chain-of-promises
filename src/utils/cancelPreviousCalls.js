@@ -1,23 +1,20 @@
-import CancelToken, { always } from '../index';
+import { always } from '../index';
 
-const cancelPreviousCalls = (builder) => {
-  let previousCancel = null;
+const cancelPreviousCalls = (builder, CancellationTokenSource) => {
+  let previousSource = null;
   return function wrapper(...arts) {
-    let clean = null;
-    if (previousCancel) {
-      previousCancel();
+    if (previousSource) {
+      previousSource.cancel();
     }
-    const token = new CancelToken((cancel) => {
-      previousCancel = cancel;
-      clean = () => {
-        if (previousCancel === cancel) {
-          previousCancel = null;
-        }
-      };
-    });
-    const func = builder(token);
+    const source = new CancellationTokenSource();
+    previousSource = source;
+    const func = builder(source.token);
     const result = func.apply(this, arts);
-    always.call(Promise.resolve(result), clean);
+    always.call(Promise.resolve(result), () => {
+      if (previousSource === source) {
+        previousSource = null;
+      }
+    });
     return result;
   };
 };
